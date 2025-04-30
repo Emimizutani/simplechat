@@ -4,11 +4,13 @@ import os
 import boto3
 import re  # 正規表現モジュールをインポート
 from botocore.exceptions import ClientError
+
 import urllib.request
 import urllib3
 
 FASTAPI_ENDPOINT = os.environ.get("FASTAPI_ENDPOINT", "https://1076-34-141-222-91.ngrok-free.app/generate")
 http = urllib3.PoolManager()
+
 
 # Lambda コンテキストからリージョンを抽出する関数
 def extract_region_from_arn(arn):
@@ -57,70 +59,45 @@ def lambda_handler(event, context):
             "role": "user",
             "content": message
         })
-        
-        # Nova Liteモデル用のリクエストペイロードを構築
+        print("Chat history:", messages)
+        # モデル用のリクエストペイロードを構築
         # 会話履歴を含める
-        bedrock_messages = []
+        prompt_lines = []
         for msg in messages:
-            if msg["role"] == "user":
-                bedrock_messages.append({
-                    "role": "user",
-                    "content": [{"text": msg["content"]}]
-                })
-            elif msg["role"] == "assistant":
-                bedrock_messages.append({
-                    "role": "assistant", 
-                    "content": [{"text": msg["content"]}]
-                })
+            role = msg["role"]
+            content = msg["content"]
+            prompt_lines.append(f"{role.capitalize()}: {content}")
+        prompt = "\n".join(prompt_lines)
         
         # invoke_model用のリクエストペイロード
         request_payload = {
-            "messages": bedrock_messages,
-            "inferenceConfig": {
-                "maxTokens": 512,
-                "stopSequences": [],
-                "temperature": 0.7,
-                "topP": 0.9
-            }
-        }
-        
-        print("Calling Bedrock invoke_model API with payload:", json.dumps(request_payload))
-        
-        # # invoke_model APIを呼び出し
-        # response = bedrock_client.invoke_model(
-        #     modelId=MODEL_ID,
-        #     body=json.dumps(request_payload),
-        #     contentType="application/json"
-        # )
-        
-        # 推論用リクエストペイロード
-        payload = {
-            "prompt": message,
+            "prompt": prompt,
             "max_new_tokens": 512,
             "do_sample": True,
             "temperature": 0.7,
             "top_p": 0.9
         }
         
+        print("Calling Bedrock invoke_model API with payload:", json.dumps(request_payload))
+        
         # FastAPI呼び出し（HTTPS POST）
         response = http.request(
             "POST",
             FASTAPI_ENDPOINT,
-            body=json.dumps(payload),
+            body=json.dumps(request_payload),
             headers={"Content-Type": "application/json"}
         )
         
-        # レスポンスを解析
-        response_body = json.loads(response['body'].read())
-        print("Bedrock response:", json.dumps(response_body, default=str))
         
         # 応答の検証
-        if not response_body.get('output') or not response_body['output'].get('message') or not response_body['output']['message'].get('content'):
-            raise Exception("No response content from the model")
-        
+        if response.status != 200:
+            raise Exception(f"Inference API returned status {response.status}: {response.data.decode()}")
+
         # アシスタントの応答を取得
-        assistant_response = response_body['output']['message']['content'][0]['text']
-        
+        result = json.loads(response.data.decode())
+        assistant_response =result['generated_text']
+
+
         # アシスタントの応答を会話履歴に追加
         messages.append({
             "role": "assistant",
