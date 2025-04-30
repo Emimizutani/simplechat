@@ -4,7 +4,11 @@ import os
 import boto3
 import re  # 正規表現モジュールをインポート
 from botocore.exceptions import ClientError
+import urllib.request
+import urllib3
 
+FASTAPI_ENDPOINT = os.environ.get("FASTAPI_ENDPOINT", "https://1076-34-141-222-91.ngrok-free.app/generate")
+http = urllib3.PoolManager()
 
 # Lambda コンテキストからリージョンを抽出する関数
 def extract_region_from_arn(arn):
@@ -82,11 +86,28 @@ def lambda_handler(event, context):
         
         print("Calling Bedrock invoke_model API with payload:", json.dumps(request_payload))
         
-        # invoke_model APIを呼び出し
-        response = bedrock_client.invoke_model(
-            modelId=MODEL_ID,
-            body=json.dumps(request_payload),
-            contentType="application/json"
+        # # invoke_model APIを呼び出し
+        # response = bedrock_client.invoke_model(
+        #     modelId=MODEL_ID,
+        #     body=json.dumps(request_payload),
+        #     contentType="application/json"
+        # )
+        
+        # 推論用リクエストペイロード
+        payload = {
+            "prompt": message,
+            "max_new_tokens": 512,
+            "do_sample": True,
+            "temperature": 0.7,
+            "top_p": 0.9
+        }
+        
+        # FastAPI呼び出し（HTTPS POST）
+        response = http.request(
+            "POST",
+            FASTAPI_ENDPOINT,
+            body=json.dumps(payload),
+            headers={"Content-Type": "application/json"}
         )
         
         # レスポンスを解析
